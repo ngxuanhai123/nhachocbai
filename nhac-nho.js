@@ -7,6 +7,8 @@
 // @match        *://*/*
 // @noframes
 // @grant        GM_setValue
+// @updateURL    https://raw.githubusercontent.com/ngxuanhai123/nhachocbai/refs/heads/main/nhac-nho.js
+// @downloadURL  https://raw.githubusercontent.com/ngxuanhai123/nhachocbai/refs/heads/main/nhac-nho.js
 // @grant        GM_getValue
 // ==/UserScript==
 
