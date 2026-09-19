@@ -1,15 +1,16 @@
 // ==UserScript==
 // @name         Nhắc Nhở Học Bài Pro
 // @namespace    http://tampermonkey.net/
-// @version      6.1
+// @version      6.2
 // @description  Thanh nhắc học 1 dòng chữ chạy, khoá màn hình khi lướt FB/Reddit quá giờ (gia hạn 1 lần, trần 30p/ngày dùng chung xuyên site)
 // @author       You
 // @match        *://*/*
 // @noframes
 // @grant        GM_setValue
+// @grant        GM_getValue
+// @grant        GM_addValueChangeListener
 // @updateURL    https://raw.githubusercontent.com/ngxuanhai123/nhachocbai/refs/heads/main/nhac-nho.js
 // @downloadURL  https://raw.githubusercontent.com/ngxuanhai123/nhachocbai/refs/heads/main/nhac-nho.js
-// @grant        GM_getValue
 // ==/UserScript==
 
 (function () {
@@ -107,21 +108,64 @@
     let bubble = null;
     let marqueeAnim = null;
     let lockOverlay = null;
+    let updateTimer = null;
+    let distractionInterval = null;
+    let isInitialized = false;
+
+    // Lưu bằng GM_setValue/GM_getValue để dữ liệu DÙNG CHUNG giữa mọi trang script này chạy
+    // (facebook.com, youtube.com, google.com... đều dùng chung 1 cấu hình và vị trí).
+    // Có fallback về localStorage phòng khi trình quản lý userscript không hỗ trợ GM_setValue/GM_getValue.
+    function gmGet(key, fallback) {
+        try {
+            if (typeof GM_getValue === 'function') {
+                const val = GM_getValue(key, fallback);
+                if (typeof val === 'string') {
+                    try { return JSON.parse(val); } catch { return val; }
+                }
+                return val !== undefined && val !== null ? val : fallback;
+            }
+        } catch {}
+        try {
+            const raw = localStorage.getItem(key);
+            return raw === null ? fallback : JSON.parse(raw);
+        } catch {
+            return fallback;
+        }
+    }
+
+    function gmSet(key, value) {
+        try {
+            if (typeof GM_setValue === 'function') {
+                try {
+                    GM_setValue(key, value);
+                } catch {
+                    GM_setValue(key, JSON.stringify(value));
+                }
+                return;
+            }
+        } catch {}
+        try {
+            localStorage.setItem(key, JSON.stringify(value));
+        } catch {}
+    }
 
     function injectStyles() {
+        if (document.getElementById('study-reminder-styles')) return;
         const style = document.createElement('style');
+        style.id = 'study-reminder-styles';
         style.textContent = `
         @keyframes pulseGlow {
             0% { box-shadow: 0 0 0 0 rgba(255,193,7,.6); }
             70% { box-shadow: 0 0 0 10px rgba(255,193,7,0); }
             100% { box-shadow: 0 0 0 0 rgba(255,193,7,0); }
         }
+        #study-reminder-bubble.paused-anim,
         #study-reminder-bubble.dragging,
         #study-reminder-bubble.resizing {
             animation-play-state: paused !important;
         }
         `;
-        document.head.appendChild(style);
+        (document.head || document.documentElement).appendChild(style);
     }
 
     function randomMessage() {
@@ -130,8 +174,8 @@
 
     function loadState() {
         try {
-            const s = JSON.parse(localStorage.getItem(STATE_KEY));
-            if (s && typeof s.left === 'number' && typeof s.top === 'number') return s;
+            const s = gmGet(STATE_KEY, null);
+            if (s && typeof s === 'object') return s;
         } catch {}
         return null;
     }
@@ -140,7 +184,7 @@
         try {
             const current = loadState() || {};
             const merged = { ...current, ...partial };
-            localStorage.setItem(STATE_KEY, JSON.stringify(merged));
+            gmSet(STATE_KEY, merged);
         } catch {}
     }
 
@@ -148,14 +192,43 @@
         return Math.min(Math.max(value, min), max);
     }
 
-    // Giữ thanh nhắc luôn nằm trong màn hình
-    function clampToViewport(el) {
-        const rect = el.getBoundingClientRect();
-        const maxLeft = window.innerWidth - rect.width;
-        const maxTop = window.innerHeight - rect.height;
+    // Áp dụng và chuẩn hoá kích thước & vị trí từ state đã lưu
+    function applyState(saved) {
+        if (!bubble) return null;
+        const width = clamp(saved?.width || DEFAULT_WIDTH, MIN_WIDTH, MAX_WIDTH);
+        const height = clamp(saved?.height || DEFAULT_HEIGHT, MIN_HEIGHT, MAX_HEIGHT);
 
-        let left = clamp(rect.left, 0, Math.max(0, maxLeft));
-        let top = clamp(rect.top, 0, Math.max(0, maxTop));
+        const maxLeft = Math.max(0, window.innerWidth - width);
+        const maxTop = Math.max(0, window.innerHeight - height);
+
+        let left, top;
+        if (saved && typeof saved.left === 'number' && typeof saved.top === 'number') {
+            left = clamp(saved.left, 0, maxLeft);
+            top = clamp(saved.top, 0, maxTop);
+        } else {
+            left = Math.max(0, window.innerWidth - width - 20);
+            top = Math.max(0, window.innerHeight - height - 20);
+        }
+
+        bubble.style.width = width + 'px';
+        bubble.style.height = height + 'px';
+        bubble.style.left = left + 'px';
+        bubble.style.top = top + 'px';
+        bubble.style.right = 'auto';
+        bubble.style.bottom = 'auto';
+
+        return { left, top, width, height };
+    }
+
+    // Giữ thanh nhắc luôn nằm trọn vẹn trong màn hình
+    function clampToViewport(el) {
+        if (!el) return;
+        const rect = el.getBoundingClientRect();
+        const maxLeft = Math.max(0, window.innerWidth - rect.width);
+        const maxTop = Math.max(0, window.innerHeight - rect.height);
+
+        let left = clamp(rect.left, 0, maxLeft);
+        let top = clamp(rect.top, 0, maxTop);
 
         el.style.left = left + 'px';
         el.style.top = top + 'px';
@@ -167,7 +240,7 @@
 
     // Chữ + nút "Học ngay" cùng chạy ngang qua thanh, lặp vô hạn
     function startMarquee() {
-        if (!bubble) return;
+        if (!bubble || document.hidden) return;
         const viewport = bubble.querySelector('.ticker-viewport');
         const track = bubble.querySelector('.ticker-track');
         if (!viewport || !track) return;
@@ -178,7 +251,7 @@
         }
 
         requestAnimationFrame(() => {
-            if (!bubble) return;
+            if (!bubble || document.hidden) return;
             const viewportWidth = viewport.clientWidth;
             const trackWidth = track.scrollWidth;
 
@@ -198,54 +271,30 @@
                     easing: 'linear'
                 }
             );
-
-            applyVisibilityState(); // nếu tab đang ẩn, tạm dừng luôn animation vừa tạo
         });
     }
 
-    // Tab đang bị ẩn (chuyển qua tab khác / thu nhỏ trình duyệt) thì tạm dừng
-    // animation để đỡ tốn CPU/pin; quay lại tab thì chạy tiếp bình thường.
-    function applyVisibilityState() {
-        if (!bubble) return;
-        if (document.hidden) {
-            bubble.style.animationPlayState = 'paused';
-            if (marqueeAnim) marqueeAnim.pause();
-        } else {
-            bubble.style.animationPlayState = 'running';
-            if (marqueeAnim) marqueeAnim.play();
+    function pauseMarquee() {
+        if (marqueeAnim) {
+            try {
+                marqueeAnim.pause();
+            } catch {}
         }
+    }
+
+    function resumeMarquee() {
+        if (!bubble || document.hidden) return;
+        if (marqueeAnim) {
+            try {
+                marqueeAnim.play();
+                return;
+            } catch {}
+        }
+        startMarquee();
     }
 
     function isDistractingSite() {
         return DISTRACTION_HOSTS.some(re => re.test(location.hostname));
-    }
-
-    // Lưu bằng GM_setValue/GM_getValue để dữ liệu DÙNG CHUNG giữa mọi trang script này chạy
-    // (facebook.com và reddit.com sẽ cộng dồn vào CÙNG một bộ đếm), thay vì bị tách riêng
-    // theo từng tên miền như localStorage thông thường. Có fallback về localStorage phòng khi
-    // trình quản lý userscript không hỗ trợ GM_setValue/GM_getValue.
-    function gmGet(key, fallback) {
-        try {
-            if (typeof GM_getValue === 'function') return GM_getValue(key, fallback);
-        } catch {}
-        try {
-            const raw = localStorage.getItem(key);
-            return raw === null ? fallback : JSON.parse(raw);
-        } catch {
-            return fallback;
-        }
-    }
-
-    function gmSet(key, value) {
-        try {
-            if (typeof GM_setValue === 'function') {
-                GM_setValue(key, value);
-                return;
-            }
-        } catch {}
-        try {
-            localStorage.setItem(key, JSON.stringify(value));
-        } catch {}
     }
 
     function todayKey() {
@@ -306,12 +355,14 @@
         document.documentElement.style.overflow = '';
         document.body.style.overflow = '';
         if (bubble) bubble.style.display = 'flex';
+        if (!document.hidden) startDistractionTracking();
     }
 
     // Bảng che toàn màn hình, chặn tương tác với trang, kèm 1 câu động viên ngẫu nhiên.
     // reason: 'session' (hết giờ phiên, có thể còn lượt gia hạn) | 'daily' (đã hết 30 phút/ngày)
     function showLockOverlay(reason) {
         if (lockOverlay) return;
+        stopDistractionTracking();
 
         if (bubble) bubble.style.display = 'none'; // ẩn thanh nhắc để khỏi chồng lên bảng khoá
 
@@ -433,15 +484,15 @@
     }
 
     // Đếm thời gian thực tế đang xem Facebook/Reddit (chỉ tính khi tab đang active).
-    // - Bộ đếm phiên (sessionStorage) reset khi đóng tab/trình duyệt.
-    // - Bộ đếm ngày (localStorage) giữ nguyên suốt cả ngày, kể cả khi khởi động lại trình duyệt,
-    //   và là giới hạn cứng: dù gia hạn hay mở phiên mới cũng không vượt quá 30 phút/ngày.
     function startDistractionTracking() {
         if (!isDistractingSite()) return;
+        if (document.hidden) return;
+        if (distractionInterval) return;
 
         checkAndLock();
+        if (lockOverlay) return;
 
-        setInterval(() => {
+        distractionInterval = setInterval(() => {
             if (document.hidden || lockOverlay) return;
 
             const sessionElapsed = getElapsedSeconds() + 1;
@@ -453,7 +504,16 @@
         }, 1000);
     }
 
+    function stopDistractionTracking() {
+        if (distractionInterval) {
+            clearInterval(distractionInterval);
+            distractionInterval = null;
+        }
+    }
+
     function createBubble() {
+        if (bubble || document.hidden || !document.body) return;
+
         bubble = document.createElement('div');
         bubble.id = 'study-reminder-bubble';
 
@@ -559,7 +619,10 @@
         });
         close.addEventListener('click', e => {
             e.stopPropagation();
-            if (marqueeAnim) marqueeAnim.cancel();
+            if (marqueeAnim) {
+                marqueeAnim.cancel();
+                marqueeAnim = null;
+            }
             bubble.remove();
             bubble = null;
         });
@@ -582,17 +645,7 @@
 
         document.body.appendChild(bubble);
 
-        // Vị trí ban đầu
-        if (saved) {
-            bubble.style.left = saved.left + 'px';
-            bubble.style.top = saved.top + 'px';
-            bubble.style.right = 'auto';
-            bubble.style.bottom = 'auto';
-        } else {
-            bubble.style.right = '20px';
-            bubble.style.bottom = '20px';
-        }
-        clampToViewport(bubble);
+        applyState(saved);
 
         makeDraggable(bubble, [close, resizeHandle]);
         makeResizable(bubble, resizeHandle);
@@ -649,9 +702,12 @@
             const moved = dx > TAP_THRESHOLD || dy > TAP_THRESHOLD;
 
             if (moved) {
+                const rect = el.getBoundingClientRect();
                 saveState({
-                    left: parseFloat(el.style.left),
-                    top: parseFloat(el.style.top)
+                    left: rect.left,
+                    top: rect.top,
+                    width: rect.width,
+                    height: rect.height
                 });
             } else {
                 // Nhấp vào bất kỳ đâu trên thanh (trừ nút X) => nhảy vào trang học
@@ -699,9 +755,12 @@
             resizing = false;
             el.classList.remove('resizing');
 
+            const rect = el.getBoundingClientRect();
             saveState({
-                width: parseFloat(el.style.width),
-                height: parseFloat(el.style.height)
+                left: rect.left,
+                top: rect.top,
+                width: rect.width,
+                height: rect.height
             });
 
             startMarquee(); // bề rộng đổi => tính lại chữ chạy
@@ -720,9 +779,13 @@
     }
 
     function scheduleUpdates() {
+        stopScheduledUpdates();
+        if (document.hidden) return;
+
         const delay = Math.random() * (10 - 5) * 60 * 1000 + 5 * 60 * 1000;
 
-        setTimeout(() => {
+        updateTimer = setTimeout(() => {
+            if (document.hidden) return;
             if (!bubble) {
                 createBubble();
             } else {
@@ -732,17 +795,83 @@
         }, delay);
     }
 
+    function stopScheduledUpdates() {
+        if (updateTimer) {
+            clearTimeout(updateTimer);
+            updateTimer = null;
+        }
+    }
+
+    function initTab() {
+        if (isInitialized) return;
+        if (document.hidden) return;
+        if (!document.body) return;
+        isInitialized = true;
+
+        injectStyles();
+        createBubble();
+        scheduleUpdates();
+        startDistractionTracking();
+    }
+
+    function onVisibilityChange() {
+        if (document.hidden) {
+            // Tab chuyển sang nền -> tạm dừng animation và timer để giảm tải hệ thống
+            if (bubble) {
+                bubble.style.animationPlayState = 'paused';
+            }
+            pauseMarquee();
+            stopScheduledUpdates();
+            stopDistractionTracking();
+        } else {
+            // Tab trở lại hoạt động -> khởi tạo nếu chưa có, hoặc resume và đồng bộ lại
+            if (!isInitialized) {
+                initTab();
+            } else {
+                if (bubble) {
+                    const saved = loadState();
+                    applyState(saved);
+                    bubble.style.animationPlayState = 'running';
+                    resumeMarquee();
+                }
+                scheduleUpdates();
+                startDistractionTracking();
+            }
+        }
+    }
+
+    // Đồng bộ vị trí tức thì giữa các tab qua GM_addValueChangeListener
+    if (typeof GM_addValueChangeListener === 'function') {
+        try {
+            GM_addValueChangeListener(STATE_KEY, (name, oldVal, newVal, remote) => {
+                if (!remote) return; // Chỉ xử lý khi thay đổi xuất phát từ tab khác
+                if (document.hidden || !bubble) return; // Tab ẩn sẽ tự đồng bộ khi active
+                try {
+                    const state = typeof newVal === 'string' ? JSON.parse(newVal) : newVal;
+                    if (state && typeof state === 'object') {
+                        applyState(state);
+                        startMarquee();
+                    }
+                } catch {}
+            });
+        } catch {}
+    }
+
     // Giữ thanh nhắc trong màn hình nếu cửa sổ trình duyệt đổi kích thước
     window.addEventListener('resize', () => {
-        if (bubble) clampToViewport(bubble);
+        if (document.hidden || !bubble) return;
+        clampToViewport(bubble);
     });
 
-    // Tab bị ẩn (đổi tab / thu nhỏ trình duyệt) => tạm dừng animation
-    document.addEventListener('visibilitychange', applyVisibilityState);
+    document.addEventListener('visibilitychange', onVisibilityChange);
 
-    injectStyles();
-    createBubble();
-    scheduleUpdates();
-    startDistractionTracking();
+    // Khởi động khi tab đang hiển thị
+    if (!document.hidden) {
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initTab, { once: true });
+        } else {
+            initTab();
+        }
+    }
 
 })();
