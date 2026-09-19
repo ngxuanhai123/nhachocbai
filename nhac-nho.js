@@ -9,8 +9,8 @@
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_addValueChangeListener
-// @updateURL    https://raw.githubusercontent.com/ngxuanhai123/nhachocbai/refs/heads/main/nhac-nho.js
-// @downloadURL  https://raw.githubusercontent.com/ngxuanhai123/nhachocbai/refs/heads/main/nhac-nho.js
+// @updateURL    https://raw.githubusercontent.com/ngxuanhai123/nhachocbai/main/nhac-nho.js
+// @downloadURL  https://raw.githubusercontent.com/ngxuanhai123/nhachocbai/main/nhac-nho.js
 // ==/UserScript==
 
 (function () {
