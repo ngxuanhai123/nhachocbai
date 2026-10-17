@@ -1,6 +1,6 @@
 # ⏰ Nhắc Nhở Học Bài Pro
 
-![Version](https://img.shields.io/badge/version-6.4-blue)
+![Version](https://img.shields.io/badge/version-6.5-blue)
 ![Tampermonkey](https://img.shields.io/badge/Tampermonkey-%E2%9C%93-00485B)
 ![Platform](https://img.shields.io/badge/all-websites-4EAA25)
 ![Study-Link](https://img.shields.io/badge/study-Memrise-green)
@@ -262,6 +262,7 @@ nhachocbai/
 
 | Phiên bản | Thay đổi |
 |-----------|---------|
+| **6.5** | Thiết kế lại màn hình chặn (Lock Modal Card): tăng độ rộng (720px) và độ cao (460px) chuẩn màn hình laptop; fix lệch bố cục, đồng nhất kích thước nút bấm |
 | **6.4** | Fix overlay elements chồng lấn nhau khi hết thời gian; dùng `gap` thay `marginBottom`, thêm `overflowY: auto` |
 | **6.3** | Fix lỗi kích thước không nhất quán; cải thiện visual (gradient, border-radius 24px, system font, resize handle 18px) |
 | **6.2** | Fix nhớ vị trí qua GM storage; chỉ chạy trên tab đang active để giảm tải |

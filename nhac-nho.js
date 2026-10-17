@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Nhắc Nhở Học Bài Pro
 // @namespace    http://tampermonkey.net/
-// @version      6.4.1
+// @version      6.5
 // @description  Thanh nhắc học 1 dòng chữ chạy, khoá màn hình khi lướt FB/Reddit quá giờ (gia hạn 1 lần, trần 30p/ngày dùng chung xuyên site)
 // @author       You
 // @match        *://*/*
@@ -158,6 +158,10 @@
             0% { box-shadow: 0 0 0 0 rgba(255,193,7,.6); }
             70% { box-shadow: 0 0 0 10px rgba(255,193,7,0); }
             100% { box-shadow: 0 0 0 0 rgba(255,193,7,0); }
+        }
+        @keyframes lockFadeIn {
+            from { opacity: 0; transform: scale(0.96) translateY(12px); }
+            to { opacity: 1; transform: scale(1) translateY(0); }
         }
         #study-reminder-bubble.paused-anim,
         #study-reminder-bubble.dragging,
@@ -371,114 +375,218 @@
         document.documentElement.style.overflow = 'hidden';
         document.body.style.overflow = 'hidden';
 
+        injectStyles();
+
+        // Lớp nền mờ bao phủ toàn màn hình (Backdrop)
         lockOverlay = document.createElement('div');
+        lockOverlay.id = 'study-lock-overlay';
         Object.assign(lockOverlay.style, {
             position: 'fixed',
             inset: '0',
-            // Dùng số lớn hơn bubble (2147483647) để overlay luôn nằm trên cùng
             zIndex: '2147483647',
-            background: 'linear-gradient(135deg, #1e293b, #0f172a)',
+            background: 'rgba(15, 23, 42, 0.88)',
+            backdropFilter: 'blur(16px)',
+            webkitBackdropFilter: 'blur(16px)',
             color: '#fff',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '32px 20px',
+            fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif',
+            boxSizing: 'border-box',
+            overflowY: 'auto'
+        });
+
+        const isDaily = reason === 'daily';
+
+        // Khung nội dung chính (Modal Card): Tối ưu độ rộng & độ cao cho màn hình laptop
+        const card = document.createElement('div');
+        card.className = 'study-lock-card';
+        Object.assign(card.style, {
+            margin: 'auto',
+            width: '100%',
+            maxWidth: '720px',             // Tăng độ rộng lên 720px để hiển thị thoải mái trên laptop
+            minHeight: '460px',            // Tăng độ cao, tạo bố cục thông thoáng
+            background: 'linear-gradient(160deg, #1e293b 0%, #0f172a 100%)',
+            border: '1px solid rgba(255, 255, 255, 0.12)',
+            borderRadius: '24px',
+            boxShadow: '0 25px 60px -15px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.08), 0 0 50px rgba(245, 158, 11, 0.12)',
+            padding: '44px 48px',
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
             justifyContent: 'center',
-            gap: '14px',            // gap thay vì marginBottom trên từng phần tử → không bị chồng
             textAlign: 'center',
-            padding: '24px 30px',
-            fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif',
+            gap: '20px',
             boxSizing: 'border-box',
-            overflowY: 'auto'       // cuộn được khi màn hình nhỏ, tránh tràn/chồng lấn
+            animation: 'lockFadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1)'
         });
 
-        const icon = document.createElement('div');
-        icon.textContent = '🔒';
-        Object.assign(icon.style, { fontSize: '56px', lineHeight: '1', flexShrink: '0' });
-        lockOverlay.appendChild(icon);
+        // Huy hiệu icon nổi bật ở trung tâm
+        const iconWrapper = document.createElement('div');
+        Object.assign(iconWrapper.style, {
+            width: '80px',
+            height: '80px',
+            borderRadius: '50%',
+            background: isDaily ? 'rgba(239, 68, 68, 0.15)' : 'rgba(245, 158, 11, 0.15)',
+            border: isDaily ? '2px solid rgba(239, 68, 68, 0.4)' : '2px solid rgba(245, 158, 11, 0.4)',
+            boxShadow: isDaily ? '0 0 30px rgba(239, 68, 68, 0.25)' : '0 0 30px rgba(245, 158, 11, 0.25)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: '40px',
+            lineHeight: '1',
+            flexShrink: '0',
+            margin: '0 auto'
+        });
+        iconWrapper.textContent = isDaily ? '⛔' : '🔒';
+        card.appendChild(iconWrapper);
 
+        // Tiêu đề thông báo
         const title = document.createElement('div');
-        title.textContent =
-            reason === 'daily'
-                ? 'Bạn đã dùng hết 30 phút mạng xã hội cho hôm nay!'
-                : 'Đã hết giờ lướt mạng xã hội trong phiên này!';
+        title.textContent = isDaily
+            ? 'Bạn đã dùng hết 30 phút mạng xã hội cho hôm nay!'
+            : 'Đã hết giờ lướt mạng xã hội trong phiên này!';
         Object.assign(title.style, {
-            fontSize: '20px',
-            fontWeight: 'bold',
-            maxWidth: '480px',
-            lineHeight: '1.3',
+            fontSize: '24px',
+            fontWeight: '800',
+            color: '#ffffff',
+            maxWidth: '620px',
+            lineHeight: '1.35',
+            letterSpacing: '-0.02em',
+            margin: '0',
             flexShrink: '0'
         });
-        lockOverlay.appendChild(title);
+        card.appendChild(title);
 
-        const msg = document.createElement('div');
-        msg.textContent = randomMessage();
-        Object.assign(msg.style, {
+        // Khung thông điệp động viên
+        const msgBox = document.createElement('div');
+        msgBox.textContent = `"${randomMessage()}"`;
+        Object.assign(msgBox.style, {
+            width: '100%',
+            maxWidth: '600px',
+            background: 'rgba(255, 255, 255, 0.05)',
+            border: '1px solid rgba(255, 255, 255, 0.1)',
+            borderLeft: '4px solid #f59e0b',
+            borderRadius: '14px',
+            padding: '16px 24px',
             fontSize: '15px',
-            maxWidth: '440px',
             lineHeight: '1.6',
-            opacity: '0.9',
+            color: '#e2e8f0',
+            fontStyle: 'italic',
+            boxSizing: 'border-box',
+            margin: '0 auto',
             flexShrink: '0'
         });
-        lockOverlay.appendChild(msg);
+        card.appendChild(msgBox);
+
+        // Nhóm nút bấm hành động (Đồng nhất độ rộng, căn giữa tuyệt đối, không bị lệch)
+        const actions = document.createElement('div');
+        Object.assign(actions.style, {
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '12px',
+            width: '100%',
+            maxWidth: '460px',
+            margin: '4px auto 0 auto',
+            flexShrink: '0'
+        });
+
+        // Nút chính: Quay lại học ngay
+        const cta = document.createElement('button');
+        cta.textContent = '📚 Quay lại học / làm việc ngay';
+        Object.assign(cta.style, {
+            width: '100%',
+            height: '50px',
+            border: 'none',
+            borderRadius: '14px',
+            background: 'linear-gradient(135deg, #f59e0b, #d97706)',
+            color: '#fff',
+            fontWeight: '700',
+            fontSize: '16px',
+            cursor: 'pointer',
+            boxShadow: '0 4px 18px rgba(245, 158, 11, 0.4)',
+            transition: 'transform .15s ease, box-shadow .15s ease, filter .15s ease',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            boxSizing: 'border-box',
+            outline: 'none'
+        });
+        cta.addEventListener('mouseenter', () => {
+            cta.style.transform = 'translateY(-1px)';
+            cta.style.boxShadow = '0 6px 24px rgba(245, 158, 11, 0.55)';
+            cta.style.filter = 'brightness(1.05)';
+        });
+        cta.addEventListener('mouseleave', () => {
+            cta.style.transform = 'translateY(0)';
+            cta.style.boxShadow = '0 4px 18px rgba(245, 158, 11, 0.4)';
+            cta.style.filter = 'none';
+        });
+        cta.addEventListener('click', () => {
+            window.location.href = STUDY_URL;
+        });
+        actions.appendChild(cta);
 
         // Nút gia hạn: chỉ hiện khi lý do khoá là hết giờ phiên (chưa chạm giới hạn ngày)
         // và phiên này chưa dùng lượt gia hạn nào.
-        const canExtend = reason !== 'daily' && !getExtensionUsed();
+        const canExtend = !isDaily && !getExtensionUsed();
         if (canExtend) {
             const extendBtn = document.createElement('button');
             extendBtn.textContent = '➕ Cho tôi thêm 10 phút (chỉ 1 lần/phiên)';
             Object.assign(extendBtn.style, {
-                border: '2px solid rgba(255,255,255,.5)',
-                padding: '10px 20px',
-                background: 'transparent',
-                color: '#fff',
-                fontWeight: 'bold',
-                fontSize: '13px',
-                borderRadius: '10px',
+                width: '100%',
+                height: '46px',
+                border: '1.5px solid rgba(255, 255, 255, 0.25)',
+                borderRadius: '14px',
+                background: 'rgba(255, 255, 255, 0.06)',
+                color: '#f8fafc',
+                fontWeight: '600',
+                fontSize: '14px',
                 cursor: 'pointer',
-                flexShrink: '0'
+                transition: 'background .15s ease, border-color .15s ease, transform .15s ease',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxSizing: 'border-box',
+                outline: 'none'
+            });
+            extendBtn.addEventListener('mouseenter', () => {
+                extendBtn.style.background = 'rgba(255, 255, 255, 0.12)';
+                extendBtn.style.borderColor = 'rgba(255, 255, 255, 0.4)';
+            });
+            extendBtn.addEventListener('mouseleave', () => {
+                extendBtn.style.background = 'rgba(255, 255, 255, 0.06)';
+                extendBtn.style.borderColor = 'rgba(255, 255, 255, 0.25)';
             });
             extendBtn.addEventListener('click', () => {
                 setExtensionUsed();
                 hideLockOverlay();
             });
-            lockOverlay.appendChild(extendBtn);
+            actions.appendChild(extendBtn);
         }
 
-        const cta = document.createElement('button');
-        cta.textContent = '📚 Quay lại học / làm việc ngay';
-        Object.assign(cta.style, {
-            border: 'none',
-            padding: '12px 26px',
-            background: '#ff9800',
-            color: '#fff',
-            fontWeight: 'bold',
-            fontSize: '15px',
-            borderRadius: '10px',
-            cursor: 'pointer',
-            flexShrink: '0'
-        });
-        cta.addEventListener('click', () => {
-            window.location.href = STUDY_URL;
-        });
-        lockOverlay.appendChild(cta);
+        card.appendChild(actions);
 
+        // Ghi chú nhỏ dưới cùng
         const hint = document.createElement('div');
-        hint.textContent =
-            reason === 'daily'
-                ? 'Giới hạn 30 phút/ngày sẽ được làm mới vào ngày mai.'
-                : canExtend
-                ? 'Hoặc đóng tab này để nghỉ ngơi.'
-                : 'Bạn đã dùng hết lượt gia hạn của phiên này. Muốn tiếp tục, hãy khởi động lại trình duyệt (tối đa 30 phút/ngày).';
+        hint.textContent = isDaily
+            ? 'Giới hạn 30 phút/ngày sẽ được làm mới vào ngày mai.'
+            : canExtend
+            ? 'Hoặc đóng tab này để nghỉ ngơi.'
+            : 'Bạn đã dùng hết lượt gia hạn của phiên này. Muốn tiếp tục, hãy khởi động lại trình duyệt (tối đa 30 phút/ngày).';
         Object.assign(hint.style, {
-            fontSize: '12px',
-            opacity: '0.6',
-            maxWidth: '420px',
-            lineHeight: '1.5',
+            fontSize: '13px',
+            color: '#94a3b8',
+            maxWidth: '560px',
+            lineHeight: '1.55',
+            margin: '0 auto',
+            opacity: '0.85',
             flexShrink: '0'
         });
-        lockOverlay.appendChild(hint);
+        card.appendChild(hint);
 
+        lockOverlay.appendChild(card);
         document.body.appendChild(lockOverlay);
     }
 
