@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Nhắc Nhở Học Bài Pro
 // @namespace    http://tampermonkey.net/
-// @version      6.3
+// @version      6.4
 // @description  Thanh nhắc học 1 dòng chữ chạy, khoá màn hình khi lướt FB/Reddit quá giờ (gia hạn 1 lần, trần 30p/ngày dùng chung xuyên site)
 // @author       You
 // @match        *://*/*
@@ -375,6 +375,7 @@
         Object.assign(lockOverlay.style, {
             position: 'fixed',
             inset: '0',
+            // Dùng số lớn hơn bubble (2147483647) để overlay luôn nằm trên cùng
             zIndex: '2147483647',
             background: 'linear-gradient(135deg, #1e293b, #0f172a)',
             color: '#fff',
@@ -382,16 +383,17 @@
             flexDirection: 'column',
             alignItems: 'center',
             justifyContent: 'center',
+            gap: '14px',            // gap thay vì marginBottom trên từng phần tử → không bị chồng
             textAlign: 'center',
-            padding: '30px',
-            fontFamily: 'Arial,sans-serif',
-            boxSizing: 'border-box'
+            padding: '24px 30px',
+            fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif',
+            boxSizing: 'border-box',
+            overflowY: 'auto'       // cuộn được khi màn hình nhỏ, tránh tràn/chồng lấn
         });
 
         const icon = document.createElement('div');
         icon.textContent = '🔒';
-        icon.style.fontSize = '56px';
-        icon.style.marginBottom = '10px';
+        Object.assign(icon.style, { fontSize: '56px', lineHeight: '1', flexShrink: '0' });
         lockOverlay.appendChild(icon);
 
         const title = document.createElement('div');
@@ -402,8 +404,9 @@
         Object.assign(title.style, {
             fontSize: '20px',
             fontWeight: 'bold',
-            marginBottom: '16px',
-            maxWidth: '480px'
+            maxWidth: '480px',
+            lineHeight: '1.3',
+            flexShrink: '0'
         });
         lockOverlay.appendChild(title);
 
@@ -413,8 +416,8 @@
             fontSize: '15px',
             maxWidth: '440px',
             lineHeight: '1.6',
-            marginBottom: '22px',
-            opacity: '0.9'
+            opacity: '0.9',
+            flexShrink: '0'
         });
         lockOverlay.appendChild(msg);
 
@@ -433,7 +436,7 @@
                 fontSize: '13px',
                 borderRadius: '10px',
                 cursor: 'pointer',
-                marginBottom: '12px'
+                flexShrink: '0'
             });
             extendBtn.addEventListener('click', () => {
                 setExtensionUsed();
@@ -453,7 +456,7 @@
             fontSize: '15px',
             borderRadius: '10px',
             cursor: 'pointer',
-            marginBottom: '18px'
+            flexShrink: '0'
         });
         cta.addEventListener('click', () => {
             window.location.href = STUDY_URL;
@@ -467,7 +470,13 @@
                 : canExtend
                 ? 'Hoặc đóng tab này để nghỉ ngơi.'
                 : 'Bạn đã dùng hết lượt gia hạn của phiên này. Muốn tiếp tục, hãy khởi động lại trình duyệt (tối đa 30 phút/ngày).';
-        Object.assign(hint.style, { fontSize: '12px', opacity: '0.6', maxWidth: '420px' });
+        Object.assign(hint.style, {
+            fontSize: '12px',
+            opacity: '0.6',
+            maxWidth: '420px',
+            lineHeight: '1.5',
+            flexShrink: '0'
+        });
         lockOverlay.appendChild(hint);
 
         document.body.appendChild(lockOverlay);
