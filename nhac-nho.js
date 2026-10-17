@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Nhắc Nhở Học Bài Pro
 // @namespace    http://tampermonkey.net/
-// @version      6.4
+// @version      6.4.1
 // @description  Thanh nhắc học 1 dòng chữ chạy, khoá màn hình khi lướt FB/Reddit quá giờ (gia hạn 1 lần, trần 30p/ngày dùng chung xuyên site)
 // @author       You
 // @match        *://*/*
