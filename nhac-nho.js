@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Nhắc Nhở Học Bài Pro
 // @namespace    http://tampermonkey.net/
-// @version      6.2
+// @version      6.3
 // @description  Thanh nhắc học 1 dòng chữ chạy, khoá màn hình khi lướt FB/Reddit quá giờ (gia hạn 1 lần, trần 30p/ngày dùng chung xuyên site)
 // @author       You
 // @match        *://*/*
@@ -84,12 +84,12 @@
 
     const STATE_KEY = "studyReminderState"; // { left, top, width, height }
 
-    const DEFAULT_WIDTH = 260;
-    const DEFAULT_HEIGHT = 42;
-    const MIN_WIDTH = 160;
-    const MIN_HEIGHT = 36;
-    const MAX_WIDTH = 480;
-    const MAX_HEIGHT = 70;
+    const DEFAULT_WIDTH = 300;
+    const DEFAULT_HEIGHT = 46;
+    const MIN_WIDTH = 180;
+    const MIN_HEIGHT = 40;
+    const MAX_WIDTH = 520;
+    const MAX_HEIGHT = 80;
 
     const TAP_THRESHOLD = 8;      // px: dưới mức này coi là "click", trên mức này coi là "kéo"
     const MARQUEE_SPEED = 70;     // px/giây, tốc độ chữ chạy
@@ -212,6 +212,8 @@
 
         bubble.style.width = width + 'px';
         bubble.style.height = height + 'px';
+        bubble.style.minWidth = MIN_WIDTH + 'px';
+        bubble.style.minHeight = MIN_HEIGHT + 'px';
         bubble.style.left = left + 'px';
         bubble.style.top = top + 'px';
         bubble.style.right = 'auto';
@@ -518,32 +520,31 @@
         bubble.id = 'study-reminder-bubble';
 
         const saved = loadState();
-        const width = clamp(saved?.width || DEFAULT_WIDTH, MIN_WIDTH, MAX_WIDTH);
-        const height = clamp(saved?.height || DEFAULT_HEIGHT, MIN_HEIGHT, MAX_HEIGHT);
 
         Object.assign(bubble.style, {
             position: 'fixed',
             display: 'flex',
             alignItems: 'center',
-            gap: '8px',
-            width: width + 'px',
-            height: height + 'px',
+            gap: '6px',
             minWidth: MIN_WIDTH + 'px',
             minHeight: MIN_HEIGHT + 'px',
-            padding: '0 8px 0 14px',
-            background: '#2563eb',
+            padding: '0 6px 0 16px',
+            background: 'linear-gradient(135deg, #1d4ed8, #2563eb)',
             color: '#fff',
-            borderRadius: '999px',
+            borderRadius: '24px',
             zIndex: '2147483647',
-            fontFamily: 'Arial,sans-serif',
+            fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif',
             fontSize: '13px',
-            boxShadow: '0 4px 14px rgba(0,0,0,.25)',
+            lineHeight: '1',
+            fontWeight: '500',
+            boxShadow: '0 4px 20px rgba(0,0,0,.3), 0 1px 4px rgba(0,0,0,.2)',
             animation: 'pulseGlow 2.5s infinite',
-            border: '2px solid #ffd700',
+            border: '2px solid rgba(255,215,0,0.8)',
             cursor: 'pointer',
             boxSizing: 'border-box',
             touchAction: 'none',
-            userSelect: 'none'
+            userSelect: 'none',
+            overflow: 'hidden'
         });
 
         // --- Vùng chữ chạy (marquee) ---
@@ -565,7 +566,7 @@
             left: '0',
             display: 'flex',
             alignItems: 'center',
-            gap: '10px',
+            gap: '12px',
             whiteSpace: 'nowrap',
             willChange: 'transform',
             transform: 'translateY(-50%)'
@@ -576,7 +577,9 @@
         text.textContent = randomMessage();
         Object.assign(text.style, {
             whiteSpace: 'nowrap',
-            flexShrink: '0'
+            flexShrink: '0',
+            fontSize: '13px',
+            lineHeight: '1.2'
         });
         track.appendChild(text);
 
@@ -589,12 +592,14 @@
             alignItems: 'center',
             background: '#ff9800',
             color: '#fff',
-            fontWeight: 'bold',
+            fontWeight: '700',
             fontSize: '12px',
             padding: '4px 10px',
-            borderRadius: '999px',
+            borderRadius: '12px',
             whiteSpace: 'nowrap',
-            flexShrink: '0'
+            flexShrink: '0',
+            lineHeight: '1',
+            boxShadow: '0 1px 3px rgba(0,0,0,.2)'
         });
         track.appendChild(studyButton);
 
@@ -606,17 +611,21 @@
         close.innerHTML = '✕';
         Object.assign(close.style, {
             flexShrink: '0',
-            width: '20px',
-            height: '20px',
+            width: '22px',
+            height: '22px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             borderRadius: '50%',
-            background: 'rgba(255,255,255,.15)',
+            background: 'rgba(255,255,255,.2)',
             cursor: 'pointer',
             fontWeight: 'bold',
-            fontSize: '12px'
+            fontSize: '11px',
+            lineHeight: '1',
+            transition: 'background .15s'
         });
+        close.addEventListener('mouseenter', () => close.style.background = 'rgba(255,255,255,.35)');
+        close.addEventListener('mouseleave', () => close.style.background = 'rgba(255,255,255,.2)');
         close.addEventListener('click', e => {
             e.stopPropagation();
             if (marqueeAnim) {
@@ -628,18 +637,20 @@
         });
         bubble.appendChild(close);
 
-        // --- Tay cầm để kéo to/nhỏ (góc dưới phải) ---
+        // --- Tay cầm để kéo to/nhỏ (góc dưới phải) — vùng hit lớn hơn để dễ bắt ---
         const resizeHandle = document.createElement('div');
         Object.assign(resizeHandle.style, {
             position: 'absolute',
-            right: '2px',
-            bottom: '2px',
-            width: '14px',
-            height: '14px',
+            right: '0',
+            bottom: '0',
+            width: '18px',
+            height: '18px',
             cursor: 'nwse-resize',
             touchAction: 'none',
+            // Dùng SVG-like stripes bằng CSS gradient, rõ ràng hơn
             background:
-                'linear-gradient(135deg, transparent 0%, transparent 45%, rgba(255,255,255,.7) 45%, rgba(255,255,255,.7) 55%, transparent 55%, transparent 100%)'
+                'repeating-linear-gradient(135deg, transparent, transparent 3px, rgba(255,255,255,.55) 3px, rgba(255,255,255,.55) 4px)',
+            borderRadius: '0 0 22px 0'
         });
         bubble.appendChild(resizeHandle);
 
